@@ -1,0 +1,96 @@
+{
+  "name": "bail-reckoner",
+  "version": "1.0.0",
+  "description": "Bail Reckoner – Production-grade desktop application for bail calculation and risk assessment",
+  "author": {
+    "name": "Bail Reckoner",
+    "email": "dev@bailreckoner.app"
+  },
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,magenta \"vite\" \"wait-on http://localhost:5173 && cross-env ELECTRON_ENV=development electron .\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "package": "npm run build && electron-builder",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win",
+    "package:linux": "npm run build && electron-builder --linux",
+    "lint": "eslint src electron --ext .js,.jsx"
+  },
+  "build": {
+    "appId": "app.bailreckoner.desktop",
+    "productName": "Bail Reckoner",
+    "copyright": "Copyright © 2024 Bail Reckoner",
+    "directories": {
+      "buildResources": "public",
+      "output": "dist-electron"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        }
+      ],
+      "icon": "public/icon.icns"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icon.ico"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "public/icon.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Bail Reckoner"
+    },
+    "dmg": {
+      "title": "Bail Reckoner",
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.7",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.17.0",
+    "tailwindcss": "^4.1.7",
+    "vite": "^6.3.5",
+    "wait-on": "^8.0.3"
+  }
+}
