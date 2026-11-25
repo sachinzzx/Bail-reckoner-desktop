@@ -52,6 +52,19 @@ const INVOKE_CHANNELS = new Set([
 
   // Dashboard
   'db:dashboard:stats',
+
+  // Desktop APIs
+  'desktop:toggleQuickLookup',
+  'desktop:openPreview',
+  'desktop:runBailScan',
+  'desktop:getTheme',
+  'desktop:toggleTheme',
+  'desktop:copyToClipboard',
+  'desktop:exportCasePDF',
+  'desktop:exportCaseJSON',
+  'desktop:importCaseJSON',
+  'desktop:openExternal',
+  'desktop:showInFolder',
 ])
 
 /** Fire-and-forget sends (renderer → main) */
@@ -63,6 +76,12 @@ const SEND_CHANNELS = new Set([
 const RECEIVE_CHANNELS = new Set([
   'app:update-available',
   'app:update-downloaded',
+  // Desktop push events
+  'app:navigate-to-case',
+  'app:bail-scan-results',
+  'app:theme-changed',
+  'app:action',
+  'app:import-case',
 ])
 
 // ─── Safe wrappers ────────────────────────────────────────────────────────────
@@ -149,10 +168,30 @@ contextBridge.exposeInMainWorld('bailAPI', {
     },
   },
 
+  // ── Desktop APIs ────────────────────────────────────────────────────────────
+  desktop: {
+    toggleQuickLookup: ()         => safeInvoke('desktop:toggleQuickLookup'),
+    openPreview:       (title)    => safeInvoke('desktop:openPreview', title),
+    runBailScan:       ()         => safeInvoke('desktop:runBailScan'),
+    getTheme:          ()         => safeInvoke('desktop:getTheme'),
+    toggleTheme:       (target)   => safeInvoke('desktop:toggleTheme', target),
+    copyToClipboard:   (text)     => safeInvoke('desktop:copyToClipboard', text),
+    exportCasePDF:     (caseId)   => safeInvoke('desktop:exportCasePDF', caseId),
+    exportCaseJSON:    (caseId)   => safeInvoke('desktop:exportCaseJSON', caseId),
+    importCaseJSON:    ()         => safeInvoke('desktop:importCaseJSON'),
+    openExternal:      (url)      => safeInvoke('desktop:openExternal', url),
+    showInFolder:      (fp)       => safeInvoke('desktop:showInFolder', fp),
+  },
+
   // ── Logging ─────────────────────────────────────────────────────────────────
   log: (message) => safeSend('app:log', message),
 
   // ── Push events from main ────────────────────────────────────────────────────
-  onUpdateAvailable: (cb) => safeOn('app:update-available', cb),
-  onUpdateDownloaded: (cb) => safeOn('app:update-downloaded', cb),
+  onUpdateAvailable:  (cb) => safeOn('app:update-available',   cb),
+  onUpdateDownloaded: (cb) => safeOn('app:update-downloaded',  cb),
+  onNavigateToCase:   (cb) => safeOn('app:navigate-to-case',   cb),
+  onBailScanResults:  (cb) => safeOn('app:bail-scan-results',  cb),
+  onThemeChanged:     (cb) => safeOn('app:theme-changed',      cb),
+  onAction:           (cb) => safeOn('app:action',             cb),
+  onImportCase:       (cb) => safeOn('app:import-case',        cb),
 })

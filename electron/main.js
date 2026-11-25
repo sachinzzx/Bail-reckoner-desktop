@@ -3,10 +3,11 @@
  *
  * Startup order
  * ─────────────
- *  1. initDatabase()      – WASM SQLite fully ready before any window opens
- *  2. Register IPC handlers (system, bail engine, cases/DB)
- *  3. Create BrowserWindow via WindowManager
- *  4. Security: block external navigation & new-window creation
+ *  1. initDatabase()          – WASM SQLite fully ready before any window opens
+ *  2. Register IPC handlers   – system, bail engine, cases/DB, desktop APIs
+ *  3. initWindowManager()     – main window, tray, app menu, global shortcut
+ *  4. runBailScan (deferred)  – fire half-term alerts 4 s after startup
+ *  5. Security guard          – block external navigation & new-window creation
  */
 
 'use strict'
@@ -17,12 +18,13 @@ const path = require('path')
 const isDev = process.env.ELECTRON_ENV === 'development'
 
 // ─── Window manager ───────────────────────────────────────────────────────────
-const { createMainWindow } = require('./windows/mainWindow')
+const { initWindowManager } = require('./windows/windowManager')
 
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
-const { registerSystemHandlers } = require('./ipc/systemHandlers')
-const { registerBailHandlers }   = require('./ipc/bailHandlers')
-const { registerCaseHandlers }   = require('./ipc/caseHandlers')
+const { registerSystemHandlers }  = require('./ipc/systemHandlers')
+const { registerBailHandlers }    = require('./ipc/bailHandlers')
+const { registerCaseHandlers }    = require('./ipc/caseHandlers')
+const { registerDesktopHandlers, runBailScan } = require('./ipc/desktopHandlers')
 
 // ─── Database ─────────────────────────────────────────────────────────────────
 const { initDatabase } = require('./db/database')
@@ -45,20 +47,20 @@ app.whenReady().then(async () => {
   registerSystemHandlers()
   registerBailHandlers()
   registerCaseHandlers()
+  registerDesktopHandlers()
 
-  // 3. Create the main window
-  mainWindow = createMainWindow(isDev)
+  // 3. Create the main window, tray, app menu, and global shortcut
+  mainWindow = initWindowManager()
+
+  // 4. Fire initial bail scan 4 s after startup (after renderer has loaded)
+  setTimeout(() => {
+    try { runBailScan(mainWindow) } catch (e) { console.error('[Main] BailScan error:', e) }
+  }, 4000)
 
   // Open external links in the system browser, not inside Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
-  })
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      mainWindow = createMainWindow(isDev)
-    }
   })
 })
 
