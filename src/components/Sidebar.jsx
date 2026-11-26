@@ -2,14 +2,14 @@ import React from 'react'
 import { useApp, ROLES, NAV_ITEMS } from '../context/AppContext'
 
 export default function Sidebar() {
-  const { role, setRole, nav, setNav, isDark, toggleTheme, alerts } = useApp()
-  const currentRole = ROLES.find(r => r.id === role)
+  const { role, setRole, nav, setNav, isDark, toggleTheme, alerts, setShortcutsOpen } = useApp()
+  const isMac = navigator.platform?.toLowerCase().includes('mac')
 
   return (
     <aside className="flex flex-col w-56 shrink-0 border-r border-border bg-surface h-full select-none">
-      {/* ── Title bar region (macOS traffic lights) ── */}
-      <div className="app-drag h-10 flex items-center px-4 border-b border-border shrink-0">
-        <div className="app-no-drag flex items-center gap-2 mt-0.5">
+      {/* ── Title bar region (macOS traffic lights spacer) ── */}
+      <div className={`app-drag h-11 flex items-center border-b border-border shrink-0 ${isMac ? 'pl-20 pr-3' : 'px-4'}`}>
+        <div className="app-no-drag flex items-center gap-2">
           <span className="text-base">⚖️</span>
           <span className="text-sm font-semibold text-primary tracking-tight">Bail Reckoner</span>
         </div>
@@ -25,7 +25,7 @@ export default function Sidebar() {
               onClick={() => setRole(r.id)}
               className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all text-left w-full cursor-pointer
                 ${role === r.id
-                  ? 'bg-indigo-600/20 text-indigo-400 ring-1 ring-inset ring-indigo-500/30'
+                  ? 'badge-indigo'
                   : 'text-secondary hover:bg-surface-2 hover:text-primary'}`}
             >
               <span className="text-sm">{r.icon}</span>
@@ -61,8 +61,8 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* ── Bottom: theme + version ── */}
-      <div className="px-3 py-3 border-t border-border shrink-0 space-y-2">
+      {/* ── Bottom: theme + shortcuts + version ── */}
+      <div className="px-3 py-3 border-t border-border shrink-0 space-y-1">
         <button
           onClick={toggleTheme}
           className="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-xs text-secondary hover:bg-surface-2 hover:text-primary transition-all cursor-pointer"
@@ -70,7 +70,14 @@ export default function Sidebar() {
           <span>{isDark ? '🌙' : '☀️'}</span>
           <span>{isDark ? 'Dark Mode' : 'Light Mode'}</span>
         </button>
-        <div className="px-1 text-[10px] text-muted">
+        <button
+          onClick={() => setShortcutsOpen(true)}
+          className="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-xs text-secondary hover:bg-surface-2 hover:text-primary transition-all cursor-pointer"
+        >
+          <span>⌨️</span>
+          <span>Shortcuts</span>
+        </button>
+        <div className="px-1 pt-1 text-[10px] text-muted">
           <span>Bail Reckoner v1.0 · Offline</span>
         </div>
       </div>

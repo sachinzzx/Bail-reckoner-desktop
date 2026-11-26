@@ -56,6 +56,7 @@ const INVOKE_CHANNELS = new Set([
   // Desktop APIs
   'desktop:toggleQuickLookup',
   'desktop:openPreview',
+  'desktop:getWindowStatus',
   'desktop:runBailScan',
   'desktop:getTheme',
   'desktop:toggleTheme',
@@ -171,7 +172,8 @@ contextBridge.exposeInMainWorld('bailAPI', {
   // ── Desktop APIs ────────────────────────────────────────────────────────────
   desktop: {
     toggleQuickLookup: ()         => safeInvoke('desktop:toggleQuickLookup'),
-    openPreview:       (title)    => safeInvoke('desktop:openPreview', title),
+    openPreview:       (arg)      => safeInvoke('desktop:openPreview', arg),
+    getWindowStatus:   ()         => safeInvoke('desktop:getWindowStatus'),
     runBailScan:       ()         => safeInvoke('desktop:runBailScan'),
     getTheme:          ()         => safeInvoke('desktop:getTheme'),
     toggleTheme:       (target)   => safeInvoke('desktop:toggleTheme', target),

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
 import { useSystemInfo } from '../hooks/useIPC'
 import { Card, CardHeader } from '../components/ui/Card'
@@ -16,12 +16,26 @@ function InfoRow({ label, value, mono = false }) {
 }
 
 export default function SystemStatus() {
-  const { isDark, toggleTheme, sysInfo } = useApp()
+  const { isDark, sysInfo } = useApp()
   const { data: liveInfo, loading, refetch } = useSystemInfo()
   const info = liveInfo || sysInfo
 
+  const [winStatus, setWinStatus] = useState(null)
   const [msg, setMsg] = useState(null)
   const showMsg = (m) => { setMsg(m); setTimeout(() => setMsg(null), 4000) }
+
+  const refreshWindows = useCallback(async () => {
+    try {
+      const s = await window.bailAPI?.desktop?.getWindowStatus?.()
+      if (s) setWinStatus(s)
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    refreshWindows()
+    const id = setInterval(refreshWindows, 2500)
+    return () => clearInterval(id)
+  }, [refreshWindows])
 
   const testNotification = async () => {
     try {
@@ -33,7 +47,8 @@ export default function SystemStatus() {
   const showDBInFolder = async () => {
     try {
       if (!info?.appDataPath) { showMsg('⚠️ App data path unavailable.'); return }
-      const dbPath = info.appDataPath + '/bail_reckoner.sqlite'
+      const sep = info.platform === 'win32' ? '\\' : '/'
+      const dbPath = `${info.appDataPath}${sep}bail_reckoner.sqlite`
       await window.bailAPI?.desktop?.showInFolder?.(dbPath)
     } catch (e) { showMsg(`❌ ${e?.message}`) }
   }
@@ -43,18 +58,22 @@ export default function SystemStatus() {
 
   const copyDBPath = async () => {
     if (!info?.appDataPath) return
-    await window.bailAPI?.desktop?.copyToClipboard?.(info.appDataPath + '/bail_reckoner.sqlite')
+    const sep = info.platform === 'win32' ? '\\' : '/'
+    await window.bailAPI?.desktop?.copyToClipboard?.(`${info.appDataPath}${sep}bail_reckoner.sqlite`)
     showMsg('✅ DB path copied!')
   }
+
+  const isMac = info?.platform === 'darwin'
+  const modKey = isMac ? '⌘' : 'Ctrl'
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-5 fade-in">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-primary">🖥️ Desktop APIs & System Status</h2>
-          <p className="text-xs text-muted mt-0.5">Live Electron runtime info, native integrations, and system controls</p>
+          <h2 className="text-lg font-semibold text-primary">🖥️ Desktop APIs &amp; System Status</h2>
+          <p className="text-xs text-muted mt-0.5">Live Electron runtime info, native integrations, and multi-window telemetry</p>
         </div>
-        <Button size="sm" variant="secondary" onClick={refetch}>↻ Refresh</Button>
+        <Button size="sm" variant="secondary" onClick={() => { refetch(); refreshWindows() }}>↻ Refresh</Button>
       </div>
 
       {msg && (
@@ -62,7 +81,6 @@ export default function SystemStatus() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Runtime Info */}
         <Card>
           <CardHeader title="⚡ Electron Runtime" subtitle="Live process environment" />
           {loading ? <div className="flex justify-center py-6"><Spinner /></div> : (
@@ -77,30 +95,28 @@ export default function SystemStatus() {
           )}
         </Card>
 
-        {/* SQLite DB */}
         <Card>
-          <CardHeader title="🗄️ Offline SQLite Database" subtitle="sql.js WASM — zero native dependencies" />
+          <CardHeader title="🗄️ Offline SQLite Database" subtitle="sql.js WASM — persisted in userData" />
           <div className="space-y-3">
             <div>
               <div className="text-[10px] text-muted uppercase tracking-wider mb-1">Database Path</div>
               <div className="flex items-center gap-2 p-2 bg-surface-2 rounded-lg border border-border">
                 <code className="text-[10px] text-secondary break-all flex-1 font-mono">
-                  {info?.appDataPath ? `${info.appDataPath}/bail_reckoner.sqlite` : 'Loading…'}
+                  {info?.appDataPath ? `${info.appDataPath}${isMac || info.platform === 'linux' ? '/' : '\\'}bail_reckoner.sqlite` : 'Loading…'}
                 </code>
               </div>
             </div>
             <div className="flex gap-2">
-              <Button size="xs" variant="secondary" onClick={showDBInFolder}>📁 Show in Finder</Button>
+              <Button size="xs" variant="secondary" onClick={showDBInFolder}>📁 Show in Folder</Button>
               <Button size="xs" variant="ghost" onClick={copyDBPath}>📋 Copy Path</Button>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-emerald-400 font-medium">Database online · persistent storage active</span>
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-xs fg-emerald font-medium">Database online · persistent storage active</span>
             </div>
           </div>
         </Card>
 
-        {/* Global Shortcut */}
         <Card>
           <CardHeader title="⌨️ Global Shortcut" subtitle="OS-level keyboard shortcut" />
           <div className="space-y-3">
@@ -110,21 +126,20 @@ export default function SystemStatus() {
                 <div className="text-xs text-muted mt-0.5">Toggle spotlight-style section search from anywhere</div>
               </div>
               <div className="flex items-center gap-1">
-                {['⌘', 'Shift', 'B'].map(k => (
-                  <kbd key={k} className="px-2 py-1 text-xs font-mono bg-surface-3 border border-border-2 rounded text-secondary">{k}</kbd>
+                {[modKey, 'Shift', 'B'].map(k => (
+                  <kbd key={k} className="px-2 py-1 text-xs font-mono bg-surface-3 border border-border-2 rounded text-primary">{k}</kbd>
                 ))}
               </div>
             </div>
             <Button size="sm" variant="secondary" className="w-full justify-center"
-              onClick={() => window.bailAPI?.desktop?.toggleQuickLookup?.()}>
-              🔍 Open Quick Lookup
+              onClick={async () => { await window.bailAPI?.desktop?.toggleQuickLookup?.(); refreshWindows() }}>
+              🔍 Toggle Quick Lookup
             </Button>
           </div>
         </Card>
 
-        {/* Theme Controls */}
         <Card>
-          <CardHeader title="🎨 Appearance" subtitle="Synced with Electron nativeTheme" />
+          <CardHeader title="🎨 Appearance" subtitle="Synced with Electron nativeTheme across all windows" />
           <div className="space-y-3">
             <div className="flex gap-2">
               {[
@@ -145,13 +160,12 @@ export default function SystemStatus() {
           </div>
         </Card>
 
-        {/* Native Notifications */}
         <Card>
           <CardHeader title="🔔 Native OS Notifications" subtitle="Test Electron Notification API" />
           <div className="space-y-3">
             <div className="text-xs text-secondary leading-relaxed">
               Notifications fire automatically on startup and when running a Bail Scan.
-              Clicking a notification focuses the main window and navigates to the case.
+              Clicking a notification focuses the main window and opens that case.
             </div>
             <Button size="sm" variant="primary" onClick={testNotification} className="w-full justify-center">
               🔔 Fire Test Notification (Bail Scan)
@@ -159,34 +173,35 @@ export default function SystemStatus() {
           </div>
         </Card>
 
-        {/* Active Windows */}
         <Card>
-          <CardHeader title="🪟 Multi-Window Manager" subtitle="All active BrowserWindows" />
+          <CardHeader
+            title="🪟 Multi-Window Manager"
+            subtitle={winStatus ? `${winStatus.totalWindows} live BrowserWindow(s)` : 'BrowserWindow instances'}
+          />
           <div className="space-y-2">
             {[
-              { name: 'Main Window',           shortcut: null,          desc: '1280×800 · state-persisted · full workspace' },
-              { name: 'Quick Lookup (Floating)',shortcut: '⌘ Shift B',   desc: '520×420 · frameless · always on top' },
-              { name: 'Preview Child Window',   shortcut: null,          desc: '920×720 · case law & report preview' },
+              { name: 'Main Window',             active: winStatus?.mainOpen ?? true, desc: '1280×800 · state-persisted' },
+              { name: 'Quick Lookup (Floating)', active: winStatus?.quickLookupOpen,   desc: `520×420 · frameless (${modKey}+Shift+B)` },
+              { name: 'Precedent Child Window',  active: winStatus?.previewOpen,       desc: '920×720 · precedent detail' },
             ].map(w => (
               <div key={w.name} className="flex items-center justify-between p-3 bg-surface-2 rounded-lg border border-border">
                 <div>
                   <div className="text-xs font-medium text-primary">{w.name}</div>
                   <div className="text-[10px] text-muted">{w.desc}</div>
                 </div>
-                {w.shortcut && (
-                  <kbd className="px-2 py-0.5 text-[10px] font-mono bg-surface-3 border border-border-2 rounded text-secondary">{w.shortcut}</kbd>
-                )}
+                <Badge color={w.active ? 'emerald' : 'slate'} size="xs">
+                  {w.active ? 'Visible' : 'Standby'}
+                </Badge>
               </div>
             ))}
             <Button size="sm" variant="secondary" className="w-full justify-center"
-              onClick={() => window.bailAPI?.desktop?.openPreview?.('Report Preview')}>
-              ↗ Open Preview Window
+              onClick={async () => { await window.bailAPI?.desktop?.openPreview?.({ title: 'Judicial Precedents', precedentId: 1 }); refreshWindows() }}>
+              ↗ Open Precedent Child Window
             </Button>
           </div>
         </Card>
       </div>
 
-      {/* External links */}
       <Card>
         <CardHeader title="🌐 External Resources" subtitle="Open in system default browser via shell.openExternal" />
         <div className="flex flex-wrap gap-2">

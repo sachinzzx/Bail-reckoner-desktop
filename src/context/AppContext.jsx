@@ -1,7 +1,7 @@
 /**
- * Global App Context — role, theme, active nav, bail-scan alerts
+ * Global App Context — role, theme, active nav, active case, bail-scan alerts, shortcuts modal
  */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 
 const AppContext = createContext(null)
 
@@ -20,11 +20,33 @@ export const NAV_ITEMS = [
 ]
 
 export function AppProvider({ children }) {
-  const [role,      setRole]    = useState('legal_aid')
-  const [nav,       setNav]     = useState('dashboard')
-  const [isDark,    setIsDark]  = useState(true)
-  const [alerts,    setAlerts]  = useState([])    // bail-scan results
-  const [sysInfo,   setSysInfo] = useState(null)
+  const [role,           setRole]           = useState('legal_aid')
+  const [nav,            setNav]            = useState('dashboard')
+  const [activeCaseId,   setActiveCaseId]   = useState(null)
+  const [isDark,         setIsDark]         = useState(true)
+  const [alerts,         setAlerts]         = useState([])
+  const [sysInfo,        setSysInfo]        = useState(null)
+  const [shortcutsOpen,  setShortcutsOpen]  = useState(false)
+  const [registryVersion, setRegistryVersion] = useState(0)
+  const [globalNotice,   setGlobalNotice]   = useState(null)
+
+  const activeCaseRef = useRef(activeCaseId)
+  activeCaseRef.current = activeCaseId
+
+  const showGlobalNotice = useCallback((text) => {
+    setGlobalNotice(text)
+    setTimeout(() => setGlobalNotice(null), 4000)
+  }, [])
+
+  const openCase = useCallback((caseId) => {
+    setActiveCaseId(caseId)
+    setNav('calculator')
+  }, [])
+
+  const newCase = useCallback(() => {
+    setActiveCaseId(null)
+    setNav('calculator')
+  }, [])
 
   // Sync theme with Electron nativeTheme
   useEffect(() => {
@@ -33,7 +55,7 @@ export function AppProvider({ children }) {
     }).catch(() => {})
 
     const unsub = window.bailAPI?.onThemeChanged?.((t) => {
-      setIsDark(t.isDark)
+      if (t) setIsDark(t.isDark)
     })
     return () => { if (typeof unsub === 'function') unsub() }
   }, [])
@@ -41,26 +63,59 @@ export function AppProvider({ children }) {
   // Listen for bail scan results pushed from main
   useEffect(() => {
     const unsub = window.bailAPI?.onBailScanResults?.((data) => {
-      if (data?.alerts?.length) setAlerts(data.alerts)
+      if (data?.alerts) setAlerts(data.alerts)
     })
     return () => { if (typeof unsub === 'function') unsub() }
   }, [])
 
-  // Listen for navigate-to-case (tray / notification click)
+  // Listen for navigate-to-case (tray / OS notification click)
   useEffect(() => {
     const unsub = window.bailAPI?.onNavigateToCase?.((caseId) => {
-      setNav('calculator')
+      if (caseId) openCase(caseId)
+      else setNav('calculator')
     })
     return () => { if (typeof unsub === 'function') unsub() }
-  }, [])
+  }, [openCase])
 
-  // Listen for app:action (native menu → new-case, export-pdf, etc.)
+  // Listen for native menu actions (File -> New Case, Export PDF, Help -> Keyboard Shortcuts)
   useEffect(() => {
-    const unsub = window.bailAPI?.onAction?.((action) => {
-      if (action === 'new-case') setNav('calculator')
+    const unsub = window.bailAPI?.onAction?.(async (action) => {
+      if (action === 'new-case') {
+        newCase()
+      } else if (action === 'show-shortcuts') {
+        setShortcutsOpen(true)
+      } else if (action === 'export-pdf') {
+        const cid = activeCaseRef.current
+        if (!cid) {
+          showGlobalNotice('Select or save a case in the Bail Calculator before exporting PDF.')
+          setNav('registry')
+          return
+        }
+        try {
+          const res = await window.bailAPI?.desktop?.exportCasePDF?.(cid)
+          if (res?.success) showGlobalNotice(`✅ PDF exported → ${res.filePath}`)
+          else if (res?.error) showGlobalNotice(`❌ ${res.error}`)
+        } catch (err) {
+          showGlobalNotice(`❌ ${err?.message || err}`)
+        }
+      }
     })
     return () => { if (typeof unsub === 'function') unsub() }
-  }, [])
+  }, [newCase, showGlobalNotice])
+
+  // Listen for File -> Import Case JSON from native menu
+  useEffect(() => {
+    const unsub = window.bailAPI?.onImportCase?.((payload) => {
+      setRegistryVersion(v => v + 1)
+      if (payload?.case?.id) {
+        openCase(payload.case.id)
+        showGlobalNotice(`✅ Imported case ${payload.case.case_number || ''}`)
+      } else {
+        setNav('registry')
+      }
+    })
+    return () => { if (typeof unsub === 'function') unsub() }
+  }, [openCase, showGlobalNotice])
 
   // Fetch system info once
   useEffect(() => {
@@ -86,9 +141,13 @@ export function AppProvider({ children }) {
     <AppContext.Provider value={{
       role, setRole,
       nav,  setNav,
+      activeCaseId, setActiveCaseId, openCase, newCase,
       isDark, toggleTheme,
       alerts, setAlerts, runBailScan,
       sysInfo,
+      shortcutsOpen, setShortcutsOpen,
+      registryVersion, setRegistryVersion,
+      globalNotice, showGlobalNotice,
     }}>
       {children}
     </AppContext.Provider>

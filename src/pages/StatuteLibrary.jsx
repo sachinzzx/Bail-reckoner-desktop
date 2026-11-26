@@ -1,6 +1,5 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState } from 'react'
 import { useStatutes, usePronouncements } from '../hooks/useIPC'
-import { Card, CardHeader } from '../components/ui/Card'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { Spinner } from '../components/ui/Spinner'
@@ -22,7 +21,7 @@ function StatutesPanel() {
   const { data: statutes, loading } = useStatutes()
   const [q, setQ] = useState('')
   const [act, setAct] = useState('ALL')
-  const [bailFilter, setBailFilter] = useState('ALL') // ALL | bailable | non-bailable
+  const [bailFilter, setBailFilter] = useState('ALL')
   const [copied, setCopied] = useState(null)
 
   const filtered = (statutes || []).filter(s => {
@@ -43,7 +42,6 @@ function StatutesPanel() {
 
   return (
     <div className="space-y-3 flex-1 overflow-hidden flex flex-col">
-      {/* Filters */}
       <div className="flex gap-2 flex-wrap">
         <input
           type="text" placeholder="Search section / title / keyword…"
@@ -63,7 +61,6 @@ function StatutesPanel() {
         <span className="self-center text-xs text-muted">{filtered.length} sections</span>
       </div>
 
-      {/* Results */}
       {loading ? (
         <div className="flex justify-center py-16"><Spinner size={6} /></div>
       ) : (
@@ -74,14 +71,14 @@ function StatutesPanel() {
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono text-xs font-bold text-indigo-400">
+                    <span className="font-mono text-xs font-bold fg-indigo">
                       {ACT_LABELS[s.act_code] || s.act_code} §{s.section_number}
                     </span>
                     {s.is_bailable
                       ? <Badge color="emerald" size="xs">Bailable</Badge>
                       : <Badge color="rose" size="xs">Non-Bailable</Badge>}
-                    {s.is_compoundable && <Badge color="blue" size="xs">Compoundable</Badge>}
-                    {s.is_cognizable && <Badge color="amber" size="xs">Cognizable</Badge>}
+                    {s.is_compoundable ? <Badge color="blue" size="xs">Compoundable</Badge> : null}
+                    {s.is_cognizable ? <Badge color="amber" size="xs">Cognizable</Badge> : null}
                     {s.special_category && <Badge color="violet" size="xs">{s.special_category}</Badge>}
                   </div>
                   <div className="mt-1 text-sm font-semibold text-primary">{s.title}</div>
@@ -90,10 +87,10 @@ function StatutesPanel() {
                   )}
                   <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-muted">
                     {s.max_punishment_years === -1
-                      ? <span className="text-rose-400 font-medium">Life / Death</span>
+                      ? <span className="fg-rose font-semibold">Life / Death</span>
                       : s.max_punishment_years > 0
                       ? <span>Max: <strong className="text-secondary">{s.max_punishment_years}yr</strong></span>
-                      : null}
+                      : <span>Procedural / Evidentiary</span>}
                     {s.typical_fine_inr > 0 && (
                       <span>Fine: <strong className="text-secondary">₹{s.typical_fine_inr.toLocaleString('en-IN')}</strong></span>
                     )}
@@ -105,10 +102,10 @@ function StatutesPanel() {
                 <Button
                   size="xs" variant="ghost"
                   onClick={() => copyCitation(s)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="opacity-70 group-hover:opacity-100 transition-opacity shrink-0"
                   title="Copy citation"
                 >
-                  {copied === s.id ? '✅' : '📋'}
+                  {copied === s.id ? '✅ Copied' : '📋 Copy'}
                 </Button>
               </div>
             </div>
@@ -159,7 +156,7 @@ function PrecedentsPanel() {
               : (typeof p.applicable_tags === 'string' ? JSON.parse(p.applicable_tags || '[]') : [])
             return (
               <div key={p.id}
-                className="p-4 bg-surface-2 border border-border rounded-xl hover:border-border-2 transition-colors group border-l-4 border-l-indigo-500/50">
+                className="p-4 bg-surface-2 border border-border rounded-xl hover:border-border-2 transition-colors group border-l-4 border-l-indigo-500/60">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-bold text-primary">{p.case_name}</div>
@@ -169,17 +166,22 @@ function PrecedentsPanel() {
                       <Badge color="slate" size="xs">{p.year}</Badge>
                     </div>
                   </div>
-                  <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex gap-1.5 shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
                     <Button size="xs" variant="ghost" onClick={() => copy(p)} title="Copy citation">
                       {copied === p.id ? '✅' : '📋'}
                     </Button>
-                    <Button size="xs" variant="ghost"
-                      onClick={() => window.bailAPI?.desktop?.openPreview?.(p.case_name)}
-                      title="Open in preview window">↗</Button>
+                    <Button
+                      size="xs"
+                      variant="secondary"
+                      onClick={() => window.bailAPI?.desktop?.openPreview?.({ title: p.case_name, precedentId: p.id })}
+                      title="Open in child window"
+                    >
+                      Open ↗
+                    </Button>
                   </div>
                 </div>
                 <blockquote className="mt-3 pl-3 border-l-2 border-indigo-500/40 text-xs text-secondary italic leading-relaxed">
-                  "{p.key_principle}"
+                  &ldquo;{p.key_principle}&rdquo;
                 </blockquote>
                 {p.summary && (
                   <div className="mt-2 text-xs text-muted leading-relaxed line-clamp-2">{p.summary}</div>
@@ -207,11 +209,10 @@ export default function StatuteLibrary() {
   return (
     <div className="flex-1 overflow-hidden flex flex-col p-6 gap-4 fade-in">
       <div>
-        <h2 className="text-lg font-semibold text-primary">📚 Statute & Precedent Library</h2>
+        <h2 className="text-lg font-semibold text-primary">📚 Statute &amp; Precedent Library</h2>
         <p className="text-xs text-muted mt-0.5">IPC 1860 · BNS/BNSS/BSA 2023 · 7 Special Statutes · Supreme Court Judgments</p>
       </div>
 
-      {/* Tab switcher */}
       <div className="flex gap-1 p-1 bg-surface-2 border border-border rounded-xl self-start">
         {[
           { id: 'statutes',      label: '📖 Statutes & Sections' },

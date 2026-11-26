@@ -71,6 +71,7 @@ app.on('window-all-closed', () => {
 // Security: prevent arbitrary navigation outside the app origin
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event, url) => {
+    if (url === 'about:blank') return
     const appOrigin = isDev
       ? 'http://localhost:5173'
       : `file://${path.join(__dirname, '../dist/index.html')}`

@@ -33,19 +33,39 @@ const RISK_WEIGHTS = {
 
 // ─── Date utilities ───────────────────────────────────────────────────────────
 
+function parseUTCDate (input) {
+  if (!input) return null
+  if (input instanceof Date) {
+    return isNaN(input.getTime())
+      ? null
+      : new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()))
+  }
+  const str = String(input).trim()
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(str)
+  if (m) {
+    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])))
+  }
+  const parsed = new Date(str)
+  if (isNaN(parsed.getTime())) return null
+  return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()))
+}
+
 function daysBetween (startDate, endDate = new Date()) {
-  const ms = new Date(endDate) - new Date(startDate)
-  return Math.max(0, Math.floor(ms / 86400000))
+  const start = parseUTCDate(startDate)
+  const end   = parseUTCDate(endDate)
+  if (!start || !end) return 0
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 86400000))
 }
 
 function addDaysToDate (dateStr, days) {
-  const d = new Date(dateStr)
-  d.setDate(d.getDate() + days)
+  const d = parseUTCDate(dateStr)
+  if (!d || !Number.isFinite(days)) return null
+  d.setUTCDate(d.getUTCDate() + Math.round(days))
   return d.toISOString().split('T')[0]
 }
 
 function formatDuration (days) {
-  if (days <= 0) return '0 days'
+  if (!Number.isFinite(days) || days <= 0) return '0 days'
   const y = Math.floor(days / 365)
   const m = Math.floor((days % 365) / 30)
   const d = days % 30
@@ -60,15 +80,23 @@ function formatDuration (days) {
 
 /**
  * Find the single most severe charge across all sections.
- * Life/Death (-1) beats any finite sentence.
+ * Life/Death (-1) beats any finite sentence; ties break in favour of
+ * special-statute or non-bailable offences.
  */
 function getStrictestCharge (sections) {
   if (!sections || sections.length === 0) return null
   const lifeOrDeath = sections.filter(s => s.max_punishment_years === -1)
-  if (lifeOrDeath.length > 0) return lifeOrDeath[0]
-  return sections.reduce((max, s) =>
-    s.max_punishment_years > max.max_punishment_years ? s : max, sections[0]
-  )
+  if (lifeOrDeath.length > 0) {
+    return lifeOrDeath.find(s => s.special_category) || lifeOrDeath[0]
+  }
+  return sections.reduce((max, s) => {
+    if (s.max_punishment_years > max.max_punishment_years) return s
+    if (s.max_punishment_years === max.max_punishment_years) {
+      if (s.special_category && !max.special_category) return s
+      if (!s.is_bailable && max.is_bailable) return s
+    }
+    return max
+  }, sections[0])
 }
 
 // ─── Risk Index ───────────────────────────────────────────────────────────────
@@ -189,13 +217,31 @@ function calculateCustodyProgress (caseData, sections) {
     }
   }
 
-  const maxYears      = strictest.max_punishment_years
+  const maxYears = strictest.max_punishment_years
+  if (!maxYears || maxYears <= 0) {
+    return {
+      daysServed,
+      humanReadableDaysServed: formatDuration(daysServed),
+      hasLifeDeath:            false,
+      hasProceduralOnly:       true,
+      maxSentenceYears:        0,
+      maxSentenceDays:         0,
+      halfTermDays:            0,
+      oneThirdDays:            0,
+      halfTermProgress:        0,
+      oneThirdProgress:        0,
+      halfTermEligible:        false,
+      oneThirdEligible:        false,
+      message:                 'Selected provisions are procedural/evidentiary without a standalone imprisonment term; add a substantive offence section to compute statutory custody milestones.',
+    }
+  }
+
   const maxDays       = Math.round(maxYears * DAYS_PER_YEAR)
   const halfTermDays  = Math.round(maxDays / 2)
   const oneThirdDays  = Math.round(maxDays / 3)
 
-  const halfTermProgress  = +(daysServed / halfTermDays  * 100).toFixed(1)
-  const oneThirdProgress  = +(daysServed / oneThirdDays  * 100).toFixed(1)
+  const halfTermProgress  = halfTermDays > 0 ? +(daysServed / halfTermDays * 100).toFixed(1) : 0
+  const oneThirdProgress  = oneThirdDays > 0 ? +(daysServed / oneThirdDays * 100).toFixed(1) : 0
 
   return {
     daysServed,
@@ -484,7 +530,7 @@ function determineVerdict (caseData, natureAssessment, custodyProgress, riskInde
       label: 'CONDITIONALLY ELIGIBLE (Judicial Discretion)',
       basis: 'First-Time Offender One-Third Rule — §479 BNSS (Second Proviso)',
       reasoning: `The accused is a first-time offender and has served ${cp.oneThirdProgress}% (${cp.daysServed} days) of the maximum sentence, exceeding the 1/3rd threshold (${cp.oneThirdDays} days) under the second proviso to §479 BNSS.`,
-      recommendation: 'File bail application citing §479 BNSS (second proviso). Produce a police certificate confirming no prior criminal record. The court retains discretion but grounds are strong. Standard half-term eligibility will be reached in ${formatDuration(cp.daysToHalfTerm)}.',
+      recommendation: `File bail application citing §479 BNSS (second proviso). Produce a police certificate confirming no prior criminal record. The court retains discretion but grounds are strong. Standard half-term eligibility will be reached in ${formatDuration(cp.daysToHalfTerm)}.`,
       urgencyFlag: false,
     }
   }
@@ -561,5 +607,8 @@ module.exports = {
   calculateCustodyProgress,
   generateProceduralChecklist,
   matchPronouncements,
+  determineVerdict,
   getStrictestCharge,
+  daysBetween,
+  formatDuration,
 }

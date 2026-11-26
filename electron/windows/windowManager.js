@@ -128,11 +128,24 @@ let mainWindow        = null
 let quickLookupWindow = null
 let previewWindow     = null
 let tray              = null
+let isQuitting        = false
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const PRELOAD = path.join(__dirname, '../preload.js')
 const isDev   = () => process.env.ELECTRON_ENV === 'development'
+
+function safeMainWin () {
+  return (mainWindow && !mainWindow.isDestroyed()) ? mainWindow : undefined
+}
+
+function broadcastAll (channel, payload) {
+  BrowserWindow.getAllWindows().forEach(w => {
+    if (!w.isDestroyed() && w.webContents && !w.webContents.isDestroyed()) {
+      w.webContents.send(channel, payload)
+    }
+  })
+}
 
 function appURL (hash = '') {
   if (isDev()) return `http://localhost:5173/${hash}`
@@ -187,7 +200,12 @@ function createMainWindow () {
 
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
 
-  win.on('closed', () => { mainWindow = null })
+  win.on('closed', () => {
+    mainWindow = null
+    // Close auxiliary windows when main window closes unless macOS stays in tray with active explicit close
+    if (quickLookupWindow && !quickLookupWindow.isDestroyed()) quickLookupWindow.close()
+    if (previewWindow && !previewWindow.isDestroyed()) previewWindow.close()
+  })
   mainWindow = win
   return win
 }
@@ -196,6 +214,7 @@ function createMainWindow () {
 
 function createQuickLookupWindow () {
   if (quickLookupWindow && !quickLookupWindow.isDestroyed()) {
+    quickLookupWindow.show()
     quickLookupWindow.focus()
     return quickLookupWindow
   }
@@ -214,17 +233,19 @@ function createQuickLookupWindow () {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: true,
     },
   })
 
   if (isDev()) {
-    win.loadURL(appURL('#quick-lookup'))
+    win.loadURL(appURL('#/quick-lookup'))
   } else {
-    win.loadFile(path.join(__dirname, '../../dist/index.html'), { hash: 'quick-lookup' })
+    win.loadFile(path.join(__dirname, '../../dist/index.html'), { hash: '/quick-lookup' })
   }
 
-  win.once('ready-to-show', () => win.show())
-  win.on('blur', () => { if (quickLookupWindow && !quickLookupWindow.isDestroyed()) win.hide() })
+  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
+  win.once('ready-to-show', () => { win.show(); win.focus() })
+  win.on('blur', () => { if (!isQuitting && quickLookupWindow && !quickLookupWindow.isDestroyed()) win.hide() })
   win.on('closed', () => { quickLookupWindow = null })
 
   quickLookupWindow = win
@@ -244,8 +265,23 @@ function toggleQuickLookupWindow () {
 
 // ─── Preview / Report Child Window ────────────────────────────────────────────
 
-function createPreviewWindow (title = 'Case Preview') {
+function createPreviewWindow (arg = 'Case Preview') {
+  const opts = (typeof arg === 'object' && arg !== null)
+    ? arg
+    : { title: String(arg || 'Case Preview'), precedentId: null }
+  const title       = opts.title || 'Judicial Precedent'
+  const precedentId = opts.precedentId ?? null
+  const hash        = precedentId ? `#/precedent/${precedentId}` : '#preview'
+  const fileHash    = precedentId ? `/precedent/${precedentId}` : 'preview'
+
   if (previewWindow && !previewWindow.isDestroyed()) {
+    previewWindow.setTitle(title)
+    if (isDev()) {
+      previewWindow.loadURL(appURL(hash))
+    } else {
+      previewWindow.loadFile(path.join(__dirname, '../../dist/index.html'), { hash: fileHash })
+    }
+    previewWindow.show()
     previewWindow.focus()
     return previewWindow
   }
@@ -253,7 +289,7 @@ function createPreviewWindow (title = 'Case Preview') {
   const win = new BrowserWindow({
     width: 920, height: 720,
     title,
-    parent: mainWindow || undefined,
+    parent: safeMainWin(),
     modal: false,
     show: false,
     webPreferences: {
@@ -261,15 +297,17 @@ function createPreviewWindow (title = 'Case Preview') {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      webSecurity: true,
     },
   })
 
   if (isDev()) {
-    win.loadURL(appURL('#preview'))
+    win.loadURL(appURL(hash))
   } else {
-    win.loadFile(path.join(__dirname, '../../dist/index.html'), { hash: 'preview' })
+    win.loadFile(path.join(__dirname, '../../dist/index.html'), { hash: fileHash })
   }
 
+  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
   win.once('ready-to-show', () => win.show())
   win.on('closed', () => { previewWindow = null })
 
@@ -289,18 +327,18 @@ function createTray () {
       {
         label: 'Open Bail Reckoner',
         click () {
-          if (mainWindow) { mainWindow.show(); mainWindow.focus() }
+          if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() }
           else createMainWindow()
         },
       },
       {
-        label: 'Quick Section Lookup  (Ctrl+Shift+B)',
+        label: 'Quick Section Lookup  (Cmd/Ctrl+Shift+B)',
         click () { toggleQuickLookupWindow() },
       },
       {
         label: 'Check Statutory Half-Term Alerts',
         click () {
-          try { require('../ipc/desktopHandlers').runBailScan(mainWindow) } catch (e) { console.error(e) }
+          try { require('../ipc/desktopHandlers').runBailScan(safeMainWin()) } catch (e) { console.error(e) }
         },
       },
       {
@@ -310,21 +348,22 @@ function createTray () {
           const idx = sources.indexOf(nativeTheme.themeSource)
           nativeTheme.themeSource = sources[(idx + 1) % sources.length]
           saveWinState({ theme: nativeTheme.themeSource })
-          BrowserWindow.getAllWindows().forEach(w =>
-            w.webContents.send('app:theme-changed', {
-              themeSource: nativeTheme.themeSource,
-              isDark: nativeTheme.shouldUseDarkColors,
-            })
-          )
+          broadcastAll('app:theme-changed', {
+            themeSource: nativeTheme.themeSource,
+            isDark: nativeTheme.shouldUseDarkColors,
+          })
         },
       },
       { type: 'separator' },
-      { label: 'Quit', click () { app.quit() } },
+      { label: 'Quit', click () { isQuitting = true; app.quit() } },
     ])
   }
 
   tray.setContextMenu(buildTrayMenu())
-  tray.on('double-click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus() } })
+  tray.on('double-click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() }
+    else createMainWindow()
+  })
 
   // Rebuild context menu when theme changes (to reflect current mode label)
   nativeTheme.on('updated', () => { if (tray && !tray.isDestroyed()) tray.setContextMenu(buildTrayMenu()) })
@@ -338,7 +377,8 @@ function buildAppMenu () {
   const isMac = process.platform === 'darwin'
 
   function sendToMain (action) {
-    mainWindow?.webContents.send('app:action', action)
+    const target = safeMainWin()
+    if (target) target.webContents.send('app:action', action)
   }
 
   const fileMenu = {
@@ -352,7 +392,7 @@ function buildAppMenu () {
       {
         label: 'Import Case JSON…',
         async click () {
-          const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+          const { filePaths } = await dialog.showOpenDialog(safeMainWin(), {
             title: 'Import Case',
             filters: [{ name: 'JSON Files', extensions: ['json'] }],
             properties: ['openFile'],
@@ -361,7 +401,11 @@ function buildAppMenu () {
           try {
             const raw  = fs.readFileSync(filePaths[0], 'utf8')
             const data = JSON.parse(raw)
-            mainWindow?.webContents.send('app:import-case', data)
+            const db   = require('../db/database')
+            const { id, created_at, updated_at, ...importData } = data
+            const created = db.createCase(importData)
+            const target  = safeMainWin()
+            if (target) target.webContents.send('app:import-case', { success: true, case: created })
           } catch (err) {
             dialog.showErrorBox('Import Failed', err.message)
           }
@@ -389,9 +433,7 @@ function buildAppMenu () {
           const sources = ['system', 'dark', 'light']
           nativeTheme.themeSource = sources[(sources.indexOf(nativeTheme.themeSource) + 1) % sources.length]
           saveWinState({ theme: nativeTheme.themeSource })
-          BrowserWindow.getAllWindows().forEach(w =>
-            w.webContents.send('app:theme-changed', { themeSource: nativeTheme.themeSource, isDark: nativeTheme.shouldUseDarkColors })
-          )
+          broadcastAll('app:theme-changed', { themeSource: nativeTheme.themeSource, isDark: nativeTheme.shouldUseDarkColors })
         },
       },
       { type: 'separator' },
@@ -419,7 +461,7 @@ function buildAppMenu () {
         label: 'Run Statutory Bail Scan',
         accelerator: 'CmdOrCtrl+Shift+S',
         click () {
-          try { require('../ipc/desktopHandlers').runBailScan(mainWindow) } catch (e) { console.error(e) }
+          try { require('../ipc/desktopHandlers').runBailScan(safeMainWin()) } catch (e) { console.error(e) }
         },
       },
     ],
@@ -431,7 +473,7 @@ function buildAppMenu () {
       {
         label: 'About Bail Reckoner',
         click () {
-          dialog.showMessageBox(mainWindow, {
+          dialog.showMessageBox(safeMainWin(), {
             type: 'info',
             title: 'About Bail Reckoner',
             message: 'Bail Reckoner',
@@ -503,9 +545,18 @@ function initWindowManager () {
   createTray()
   registerGlobalShortcuts()
 
-  app.on('will-quit', unregisterGlobalShortcuts)
+  app.on('before-quit', () => {
+    isQuitting = true
+    if (quickLookupWindow && !quickLookupWindow.isDestroyed()) quickLookupWindow.destroy()
+    if (previewWindow && !previewWindow.isDestroyed()) previewWindow.destroy()
+  })
+  app.on('will-quit', () => {
+    unregisterGlobalShortcuts()
+    if (tray && !tray.isDestroyed()) tray.destroy()
+  })
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) createMainWindow()
+    else { mainWindow.show(); mainWindow.focus() }
   })
 
   return win

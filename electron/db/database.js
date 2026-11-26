@@ -19,6 +19,12 @@
 const path = require('path')
 const fs   = require('fs')
 const { app } = require('electron')
+const {
+  calculateCustodyProgress,
+  calculateRiskIndex,
+  assessNature,
+  determineVerdict,
+} = require('../engine/bailCalculator')
 
 // ─── Module-level singletons ─────────────────────────────────────────────────
 let _db          = null
@@ -239,6 +245,19 @@ function seedStatutes (db) {
     ['BNSS_2023','483','Direction for Bail by High Court or Court of Session',
      'Replaces CrPC §439. High Court or Court of Session may direct that any person accused of an offence be released on bail.',
      0,0,0,0,null,'surety_bond',0],
+
+    // ── BSA 2023 (Bharatiya Sakshya Adhiniyam — Evidentiary Provisions) ────
+    ['BSA_2023','23','Confession to Police Officer & Custody Discovery',
+     'Replaces IEA §§25-27. Confession made to a police officer cannot be proved against an accused; only distinct facts discovered in consequence of information from accused in custody are admissible.',
+     0,1,0,0,null,'personal_bond',0],
+
+    ['BSA_2023','63','Admissibility of Electronic Records',
+     'Replaces IEA §65B. Electronic record is admissible only when accompanied by a statutory certificate signed by the person in charge of the device and an expert.',
+     0,1,0,0,'CYBER','personal_bond',0],
+
+    ['BSA_2023','117','Presumption as to Abetment of Suicide by Married Woman',
+     'Replaces IEA §113A. Court may presume abetment of suicide by husband or relative where suicide occurs within 7 years of marriage and cruelty is shown.',
+     0,0,0,0,'WOMEN_PROTECTION','surety_bond',0],
 
     // ── IT Act / Cyber (IDs 25-28) ─────────────────────────────────────────
     ['CYBER_IT_ACT','66','Computer Related Offences',
@@ -508,6 +527,28 @@ async function initDatabase () {
     seedCases(_db)
     _db.run("INSERT INTO seed_meta (key,value) VALUES ('seeded','true')")
     console.log('[DB] Seeding complete.')
+  } else {
+    // Ensure BSA 2023 sections exist on pre-existing userData SQLite files
+    const bsaCount = query("SELECT COUNT(*) AS n FROM statutes_sections WHERE act_code='BSA_2023'")[0]?.n || 0
+    if (bsaCount === 0) {
+      const bsaRows = [
+        ['BSA_2023','23','Confession to Police Officer & Custody Discovery',
+         'Replaces IEA §§25-27. Confession made to a police officer cannot be proved against an accused; only distinct facts discovered in consequence of information from accused in custody are admissible.',
+         0,1,0,0,null,'personal_bond',0],
+        ['BSA_2023','63','Admissibility of Electronic Records',
+         'Replaces IEA §65B. Electronic record is admissible only when accompanied by a statutory certificate signed by the person in charge of the device and an expert.',
+         0,1,0,0,'CYBER','personal_bond',0],
+        ['BSA_2023','117','Presumption as to Abetment of Suicide by Married Woman',
+         'Replaces IEA §113A. Court may presume abetment of suicide by husband or relative where suicide occurs within 7 years of marriage and cruelty is shown.',
+         0,0,0,0,'WOMEN_PROTECTION','surety_bond',0],
+      ]
+      const sql = `INSERT INTO statutes_sections
+        (act_code,section_number,title,description,max_punishment_years,
+         is_bailable,is_compoundable,is_cognizable,special_category,default_bond_type,typical_fine_inr)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+      for (const row of bsaRows) _db.run(sql, row)
+      console.log('[DB] Backfilled BSA_2023 statute provisions.')
+    }
   }
 
   saveDatabase()
@@ -576,6 +617,32 @@ function createCase (data) {
   return getCaseById(id)
 }
 
+/** Enrich parsed case row with live bail eligibility & risk summary */
+function enrichCase (row) {
+  const c = parseCase(row)
+  if (!c) return null
+  const ids = Array.isArray(c.charges_json) ? c.charges_json : []
+  const sections = ids.length ? getStatutesByIds(ids) : []
+  const cp = calculateCustodyProgress(c, sections)
+  const risk = calculateRiskIndex(c)
+  const nature = assessNature(sections)
+  const verdict = sections.length ? determineVerdict(c, nature, cp, risk) : null
+  const isFirstTime = c.is_first_time_offender === 1 || c.is_first_time_offender === true
+
+  return {
+    ...c,
+    days_served:        cp?.daysServed ?? 0,
+    max_sentence_years: cp?.hasLifeDeath ? -1 : (cp?.maxSentenceYears ?? 0),
+    half_term_eligible: !!(cp && !cp.hasLifeDeath && !cp.hasProceduralOnly && cp.halfTermEligible),
+    one_third_eligible: !!(isFirstTime && cp && !cp.hasLifeDeath && !cp.hasProceduralOnly && cp.oneThirdEligible),
+    half_term_progress: cp?.halfTermProgress ?? 0,
+    twin_conditions:    !!nature?.twinConditionsApply,
+    verdict_status:     verdict?.status ?? 'PENDING',
+    risk_score:         risk.score,
+    risk_level:         risk.level,
+  }
+}
+
 function listCases (filters = {}) {
   let sql = 'SELECT * FROM cases'
   const params = []
@@ -584,12 +651,12 @@ function listCases (filters = {}) {
     params.push(filters.status)
   }
   sql += ' ORDER BY created_at DESC'
-  return query(sql, params).map(parseCase)
+  return query(sql, params).map(enrichCase)
 }
 
 function getCaseById (id) {
   const rows = query('SELECT * FROM cases WHERE id=?', [id])
-  return parseCase(rows[0] || null)
+  return enrichCase(rows[0] || null)
 }
 
 function updateCase (id, data) {
@@ -631,29 +698,40 @@ function deleteCase (id) {
 }
 
 function getDashboardStats () {
-  const totalCases   = query('SELECT COUNT(*) AS n FROM cases')[0]?.n || 0
-  const undertrial   = query("SELECT COUNT(*) AS n FROM cases WHERE status='undertrial'")[0]?.n || 0
-  const totalSections = query('SELECT COUNT(*) AS n FROM statutes_sections')[0]?.n || 0
+  const totalCases     = query('SELECT COUNT(*) AS n FROM cases')[0]?.n || 0
+  const undertrial     = query("SELECT COUNT(*) AS n FROM cases WHERE status='undertrial'")[0]?.n || 0
+  const totalSections  = query('SELECT COUNT(*) AS n FROM statutes_sections')[0]?.n || 0
   const totalJudgments = query('SELECT COUNT(*) AS n FROM judicial_pronouncements')[0]?.n || 0
 
-  // Cases past 50% half-term (approximation using custody_start_date in SQLite)
   const allCases = listCases()
-  let halfTermAlert = 0
-  const today = new Date()
+  let halfTermEligible = 0
+  let highRisk         = 0
+  let pendingBond      = 0
+
   for (const c of allCases) {
-    if (!c.charges_json || c.charges_json.length === 0) continue
-    const sections = getStatutesByIds(c.charges_json)
-    const maxYears = sections.reduce((m, s) => {
-      if (s.max_punishment_years === -1) return -1
-      return Math.max(m, s.max_punishment_years)
-    }, 0)
-    if (maxYears <= 0 || maxYears === -1) continue
-    const daysServed = Math.floor((today - new Date(c.custody_start_date)) / 86400000)
-    const halfTerm   = Math.round(maxYears * 365 / 2)
-    if (daysServed >= halfTerm) halfTermAlert++
+    if (c.risk_level === 'HIGH') highRisk++
+    if (c.status !== 'undertrial') continue
+
+    if (c.half_term_eligible || c.one_third_eligible) {
+      halfTermEligible++
+    }
+
+    const cl = c.procedural_checklist_json || {}
+    if (!cl.surety_bond && !cl.personal_bond) {
+      pendingBond++
+    }
   }
 
-  return { totalCases, undertrial, totalSections, totalJudgments, halfTermAlert }
+  return {
+    totalCases,
+    undertrial,
+    totalSections,
+    totalJudgments,
+    halfTermEligible,
+    halfTermAlert: halfTermEligible,
+    highRisk,
+    pendingBond,
+  }
 }
 
 module.exports = {
