@@ -1,42 +1,54 @@
-import React, { useState, useEffect } from 'react'
-import SystemInfoPanel from './components/SystemInfoPanel.jsx'
-import BailCalculatorPanel from './components/BailCalculatorPanel.jsx'
+import React, { useEffect } from 'react'
+import { AppProvider, useApp } from './context/AppContext'
+import Sidebar from './components/Sidebar'
+import Dashboard from './pages/Dashboard'
+import BailCalculator from './pages/BailCalculator'
+import CaseRegistry from './pages/CaseRegistry'
+import StatuteLibrary from './pages/StatuteLibrary'
+import SystemStatus from './pages/SystemStatus'
+import QuickLookup from './pages/QuickLookup'
+import PrecedentPreview from './pages/PrecedentPreview'
 
-export default function App() {
+/* ─── Hash-based "router" for secondary Electron windows ──────────────────── */
+function getWindowMode() {
+  const hash = window.location.hash
+  if (hash.startsWith('#quick-lookup')) return 'quick-lookup'
+  if (hash.startsWith('#preview'))      return 'preview'
+  return 'main'
+}
+
+/* ─── Main workspace ─────────────────────────────────────────────────────── */
+function MainWorkspace() {
+  const { nav, isDark } = useApp()
+
+  // Apply theme class on <html>
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', !isDark)
+  }, [isDark])
+
   return (
-    <div className="flex flex-col h-full bg-slate-950 text-slate-100">
-      {/* ── Title Bar ───────────────────────────────────────────────────────── */}
-      <header className="app-drag flex items-center gap-3 px-6 py-3 bg-slate-900 border-b border-slate-800 select-none">
-        {/* macOS traffic-light spacer */}
-        <div className="app-no-drag w-16 hidden mac:block" />
-        <div className="flex items-center gap-2 app-no-drag">
-          <span className="text-indigo-400 text-xl">⚖️</span>
-          <h1 className="text-lg font-semibold tracking-tight text-slate-100">
-            Bail Reckoner
-          </h1>
-          <span className="ml-2 px-2 py-0.5 rounded-full bg-indigo-900 text-indigo-300 text-xs font-medium">
-            v1.0
-          </span>
-        </div>
-      </header>
-
-      {/* ── Main Content ────────────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* IPC Ping → System Info */}
-        <SystemInfoPanel />
-
-        {/* Bail Calculator (demonstrates bail:calculate IPC) */}
-        <BailCalculatorPanel />
-      </main>
-
-      {/* ── Status Bar ──────────────────────────────────────────────────────── */}
-      <footer className="px-6 py-2 bg-slate-900 border-t border-slate-800 flex items-center gap-4 text-xs text-slate-500">
-        <span>Bail Reckoner Desktop</span>
-        <span>•</span>
-        <span>IPC: contextBridge + contextIsolation</span>
-        <span>•</span>
-        <span>nodeIntegration: false</span>
-      </footer>
+    <div className="flex h-full bg-bg text-primary overflow-hidden">
+      <Sidebar />
+      {nav === 'dashboard'  && <Dashboard />}
+      {nav === 'calculator' && <BailCalculator />}
+      {nav === 'registry'   && <CaseRegistry />}
+      {nav === 'library'    && <StatuteLibrary />}
+      {nav === 'system'     && <SystemStatus />}
     </div>
+  )
+}
+
+/* ─── Root App ───────────────────────────────────────────────────────────── */
+export default function App() {
+  const mode = getWindowMode()
+
+  // Secondary windows don't need the full AppProvider
+  if (mode === 'quick-lookup') return <QuickLookup />
+  if (mode === 'preview')      return <PrecedentPreview />
+
+  return (
+    <AppProvider>
+      <MainWorkspace />
+    </AppProvider>
   )
 }
