@@ -14,6 +14,7 @@
 
 const { app, BrowserWindow, shell } = require('electron')
 const path = require('path')
+const { pathToFileURL } = require('url')
 
 const isDev = process.env.ELECTRON_ENV === 'development'
 
@@ -74,7 +75,7 @@ app.on('web-contents-created', (_event, contents) => {
     if (url === 'about:blank') return
     const appOrigin = isDev
       ? 'http://localhost:5173'
-      : `file://${path.join(__dirname, '../dist/index.html')}`
+      : pathToFileURL(path.join(__dirname, '../dist/index.html')).href
     if (!url.startsWith(appOrigin)) event.preventDefault()
   })
 })

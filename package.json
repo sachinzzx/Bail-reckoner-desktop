@@ -19,12 +19,12 @@
     "lint": "eslint src electron --ext .js,.jsx"
   },
   "build": {
-    "appId": "app.bailreckoner.desktop",
+    "appId": "com.bailreckoner.desktop",
     "productName": "Bail Reckoner",
-    "copyright": "Copyright © 2024 Bail Reckoner",
+    "copyright": "Copyright © 2026 Bail Reckoner",
     "directories": {
       "buildResources": "public",
-      "output": "dist-electron"
+      "output": "release"
     },
     "files": [
       "dist/**/*",
@@ -40,7 +40,7 @@
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] }
+        { "target": "dmg", "arch": ["arm64"] }
       ],
       "icon": "public/icon.icns"
     },
